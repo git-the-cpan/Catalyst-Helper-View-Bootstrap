@@ -1,16 +1,45 @@
 package Catalyst::Helper::View::Bootstrap;
 
-our $VERSION = '0.0001';
+our $VERSION = '0.0005';
 $VERSION = eval $VERSION;
 
 use strict;
 use File::Spec;
+use Path::Class qw/dir file/;
+use File::ShareDir qw/dist_dir/;
+
+sub get_sharedir_file {
+    my ($self, @filename) = @_;
+    my $dist_dir;
+    if (exists $ENV{CATALYST_DEVEL_SHAREDIR}) {
+        $dist_dir = $ENV{CATALYST_DEVEL_SHAREDIR};
+    }
+    elsif (-d "inc/.author" && -f "lib/Catalyst/Helper/View/Bootstrap.pm"
+            ) { # Can't use sharedir if we're in a checkout
+                # this feels horrible, better ideas?
+        $dist_dir = 'share';
+    }
+    else {
+        $dist_dir = dist_dir('Catalyst-Helper-View-Bootstrap');
+    }
+    my $file = file( $dist_dir, @filename);
+    Carp::confess("Cannot find $file") unless -r $file;
+    my $contents = $file->slurp(iomode =>  "<:raw");
+    return $contents;
+}
 
 sub mk_compclass {
     my ( $self, $helper, @args ) = @_;
     my $file = $helper->{file};
     $helper->render_file( 'compclass', $file );
     $self->mk_templates( $helper, @args );
+    $helper->{root} = dir( $helper->{base}, 'root' );
+    $helper->mk_dir( $helper->{root} );
+    $helper->{static} = dir( $helper->{root}, 'static' );
+    $helper->mk_dir( $helper->{static} );
+    $helper->{images} = dir( $helper->{static}, 'images' );
+    $helper->mk_dir( $helper->{images} );
+    $self->_mk_images($helper);
 }
 
 sub mk_templates {
@@ -33,7 +62,7 @@ sub mk_templates {
     $dir = File::Spec->catfile( $ldir, 'site' );
     $helper->mk_dir($dir);
 
-    foreach my $file (qw( wrapper layout html header footer sidemenu )) {
+    foreach my $file (qw( wrapper layout html header footer )) {
         $helper->render_file( "site_$file",
             File::Spec->catfile( $dir, $file ) );
     }
@@ -41,8 +70,21 @@ sub mk_templates {
     foreach my $file (qw( welcome.tt2 message.tt2 error.tt2 ttsite.css )) {
         $helper->render_file( $file, File::Spec->catfile( $sdir, $file ) );
     }
-
 }
+
+sub _mk_images {
+    my $self   = shift;
+    my $helper = shift;
+    my $images = $helper->{images};
+    my @images =
+      qw/catalyst_logo/;
+    for my $name (@images) {
+        my $image = $self->get_sharedir_file("root", "static", "images", "$name.png.bin");
+	rename file( $images, "$name.png" ), file( $images, "$name.png" ).'.orig';
+        $helper->mk_file( file( $images, "$name.png" ), $image );
+    }
+}
+
 
 =head1 NAME
 
@@ -62,7 +104,7 @@ Catalyst::Helper::View::Bootstrap - Helper for Twitter Bootstrap and TT view whi
         $c->stash->{message}  ||= $c->req->param('message') || 'No message';
     }
 
-    sub default : Private {
+    sub index : Path : Args(0) {
         my ( $self, $c ) = @_;
         $c->stash->{template} = 'welcome.tt2';
     }
@@ -76,7 +118,8 @@ Catalyst::Helper::View::Bootstrap - Helper for Twitter Bootstrap and TT view whi
 
 This helper module creates a TT View module.  It goes further than
 Catalyst::Helper::View::TT in that it additionally creates a simple
-set of templates to get you started with your web site presentation.
+set of templates to get you started with your web site presentation
+using Twitter Bootstrap3 from a CDN (Content Delivery Network).
 
 It creates the templates in F<root/> directory underneath your
 main project directory.  In here two further subdirectories are
@@ -258,7 +301,7 @@ __site_html__
  <head>
   <title>[% template.title or site.title %]</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link href="//netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/css/bootstrap-combined.min.css" rel="stylesheet">
+  <link href="//netdna.bootstrapcdn.com/bootstrap/3.0.3/css/bootstrap.min.css" rel="stylesheet">
   <meta http-equiv="Content-Type" content="text/html;charset=utf-8" >
 
   <style type="text/css">
@@ -274,141 +317,91 @@ padding: 9px 0;
  </head>
  <body>
 [% content %]
- <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js"></script>
- <script type="text/javascript" src="//netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/js/bootstrap.min.js"></script>
+ <script type="text/javascript" src="https://code.jquery.com/jquery.js"></script>
+ <script type="text/javascript" src="//netdna.bootstrapcdn.com/bootstrap/3.0.3/js/bootstrap.min.js"></script>
  </body>
 </html>
 __site_layout__
 [% TAGS star -%]
 [% PROCESS site/header %]
 
-<div class="container-fluid">
 [% content %]
-
-<div id="footer">[% PROCESS site/footer %]</div>
-</div><!-- container-fluid -->
 __site_header__
 [% TAGS star -%]
 <!-- BEGIN site/header -->
-<div class="navbar navbar-inverse navbar-fixed-top">
-      <div class="navbar-inner">
-
-        <div class="container-fluid">
-          <a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+<div class="navbar navbar-inverse navbar-fixed-top" role="navigation">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+            <span class="sr-only">Toggle navigation</span>
             <span class="icon-bar"></span>
             <span class="icon-bar"></span>
             <span class="icon-bar"></span>
-          </a>
-          <a class="brand" href="#">[% template.title or site.title %]</a>
-          <div class="nav-collapse collapse">
-
-            <p class="navbar-text pull-right">
-              Logged in as <a href="#" class="navbar-link">Username</a>
-            </p>
-            <ul class="nav">
-              <li class="active"><a href="#">Home</a></li>
-              <li><a href="#about">About</a></li>
-              <li><a href="#contact">Contact</a></li>
-
-            </ul>
-          </div><!--/.nav-collapse -->
+          </button>
+          <a class="navbar-brand" href="#">[% template.title or site.title %]</a>
         </div>
+        <div class="navbar-collapse collapse">
+          <form class="navbar-form navbar-right" role="form">
+            <div class="form-group">
+              <input type="text" placeholder="Email" class="form-control">
+            </div>
+            <div class="form-group">
+              <input type="password" placeholder="Password" class="form-control">
+            </div>
+            <button type="submit" class="btn btn-success">Sign in</button>
+          </form>
+        </div><!--/.navbar-collapse -->
       </div>
-</div>
+    </div>
+
 <!-- END site/header -->
-__site_sidemenu__
-[% TAGS star -%]
-          <div class="well sidebar-nav">
-            <ul class="nav nav-list">
-              <li class="nav-header">Sidebar</li>
-              <li class="active"><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-
-              <li class="nav-header">Sidebar</li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-
-              <li><a href="#">Link</a></li>
-              <li class="nav-header">Sidebar</li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-              <li><a href="#">Link</a></li>
-            </ul>
-
-          </div><!--/.well -->
 __site_footer__
 [% TAGS star -%]
 <!-- BEGIN site/footer -->
-      <div class="row-fluid">
-       <div class="span4">
-         <div id="copyright">&copy; [% site.copyright %]</div>
-       </div>
-      </div>
+ <footer>
+        <p id="copyright">&copy; [% site.copyright %]</p>
+ </footer>
 <!-- END site/footer -->
 __welcome.tt2__
 [% TAGS star -%]
 [% META title = 'Catalyst/Boostrap TT View' %]
-      <div class="row-fluid">
-        <div class="span3">
-         [% PROCESS site/sidemenu %]
-        </div><!--/span-->
-        <div class="span9">
-          <div class="hero-unit">
-            <h1>Welcome to Catalyst world!</h1>
-            <p>Yay!  You're looking at a page generated by the Catalyst::View::TT 
-  plugin module and <a href="http://twitter.github.com/bootstrap/">Twitter Bootstrap</a>.<br>
-You can use the power of <a href="http://www.template-toolkit.org/">Template Toolkit 2</a> and the look and features of Bootstrap CSS.
-This is a template for a simple marketing or informational website. 
-It includes a large callout called the hero unit and three supporting pieces of content. Use it as a starting point to create something more unique.</p>
-            <p><a class="btn btn-primary btn-large">Learn more &raquo;</a></p>
+<div class="jumbotron">
+      <div class="container"><img style="float: right;" src="/static/images/catalyst_logo.png">
+        <h1>Welcome to Catalyst world!</h1>
+          <p>Yay!  You're looking at a page generated by the Catalyst::View::TT 
+  plugin module and <a href="http://getbootstrap.com/">Twitter Bootstrap</a> using a simple Helper to produce the schema that you can look in root/lib/site and root/src/welcome.tt2.<br>
+You can use the power of <a href="http://www.template-toolkit.org/">Template Toolkit 2</a> and the look and features of Bootstrap CSS.</p>
 
-          </div>
-          <div class="row-fluid">
-            <div class="span4">
-              <h2>This is only a sample</h2>
-              <p>You can change this page</p>
-              <p><a class="btn" href="#">View details &raquo;</a></p>
-            </div><!--/span-->
+        <p>This is a template for a simple marketing or informational website. It includes a large callout called a jumbotron and three supporting pieces of content. Use it as a starting point to create something more unique.</p>
+        <p><a href="http://www.catalystframework.org/" class="btn btn-primary btn-lg" role="button">Learn more &raquo;</a></p>
+      </div>
+ </div>[%# end of jumbotron %]
 
-            <div class="span4">
-              <h2>Heading</h2>
-              <p>Donec id elit non mi porta gravida at eget metus. Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh, ut fermentum massa justo sit amet risus. Etiam porta sem malesuada magna mollis euismod. Donec sed odio dui. </p>
-              <p><a class="btn" href="#">View details &raquo;</a></p>
-            </div><!--/span-->
-            <div class="span4">
-              <h2>Heading</h2>
+    <div class="container">
+      <!-- Example row of columns -->
+      <div class="row">
+        <div class="col-md-4">
+          <h2>Template Toolkit</h2>
+          <p>The Template Toolkit is a fast, flexible and highly extensible template processing system. It is Free (in both senses: free beer and free speech), Open Source software and runs on virtually every modern operating system known to man. It is mature, reliable and well documented, and is used to generate content for countless web sites ranging from the very small to the very large.</p>
+          <p><a class="btn btn-default" href="http://www.template-toolkit.org/" role="button">View details &raquo;</a></p>
+        </div>
+        <div class="col-md-4">
+          <h2>Bootstrap 3</h2>
+          <p>Sleek, intuitive, and powerful mobile first front-end framework for faster and easier web development.<br>
+             Global CSS settings, fundamental HTML elements styled and enhanced with extensible classes, and an advanced grid system. </p>
+          <p><a class="btn btn-default" href="http://getbootstrap.com/" role="button">View details &raquo;</a></p>
+       </div>
+        <div class="col-md-4">
+          <h2>jQuery or Dojo</h2>
+          <p>jQuery is common, but DojoToolkit is powerful and clean, stable and asynchronous. I would like to substitute jQuery with Dojo 2.0 as soon as it'll be released in 2014.</p>
+          <p><a class="btn btn-default" href="http://dojotoolkit.org/" role="button">View details &raquo;</a></p>
+        </div>
+      </div>
+    <hr>
 
-              <p>Donec id elit non mi porta gravida at eget metus. Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh, ut fermentum massa justo sit amet risus. Etiam porta sem malesuada magna mollis euismod. Donec sed odio dui. </p>
-              <p><a class="btn" href="#">View details &raquo;</a></p>
-            </div><!--/span-->
-          </div><!--/row-->
-          <div class="row-fluid">
-            <div class="span4">
-              <h2>Heading</h2>
-
-              <p>Donec id elit non mi porta gravida at eget metus. Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh, ut fermentum massa justo sit amet risus. Etiam porta sem malesuada magna mollis euismod. Donec sed odio dui. </p>
-              <p><a class="btn" href="#">View details &raquo;</a></p>
-            </div><!--/span-->
-            <div class="span4">
-              <h2>Heading</h2>
-              <p>Donec id elit non mi porta gravida at eget metus. Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh, ut fermentum massa justo sit amet risus. Etiam porta sem malesuada magna mollis euismod. Donec sed odio dui. </p>
-              <p><a class="btn" href="#">View details &raquo;</a></p>
-
-            </div><!--/span-->
-            <div class="span4">
-              <h2>Heading</h2>
-              <p>Donec id elit non mi porta gravida at eget metus. Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh, ut fermentum massa justo sit amet risus. Etiam porta sem malesuada magna mollis euismod. Donec sed odio dui. </p>
-              <p><a class="btn" href="#">View details &raquo;</a></p>
-            </div><!--/span-->
-          </div><!--/row-->
-
-        </div><!--/span-->
-      </div><!--/row-->
+    [% PROCESS site/footer %]
+</div>[%# end of jumbotron %]
+<!-- END of welcome -->
 __message.tt2__
 [% TAGS star -%]
 [% META title = 'Catalyst/TT View!' %]
